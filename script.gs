@@ -1,3 +1,4 @@
+//全体を実行する
 function run() {
   let err_count = 0;
 
@@ -20,6 +21,7 @@ function run() {
 }
 
 
+//以下で定義する各関数を実行する
 function mainFunction(meta, i, err_count){
   try{
   //metaから情報を取得
@@ -53,6 +55,27 @@ function mainFunction(meta, i, err_count){
     }
   }
 }
+
+
+//metaファイルの読み込む
+function readMeta() {
+
+  //メタファイルが保存されているフォルダidを指定
+  folder = '******************';
+  file = 'meta.json';
+
+  const content = DriveApp.getFolderById(folder)
+  .getFilesByName(file)
+  .next()
+  .getBlob()
+  .getDataAsString("utf-8")
+
+  return JSON.parse(content);
+}
+
+
+
+//PubmedからPMIDを取得し、前回のPMIDと比較して新規かどうかを評価する
 function fetchAndEvaluate(word, num ,user_id) {
   console.log('開始')////////////////////////////////////
 
@@ -95,6 +118,32 @@ function fetchAndEvaluate(word, num ,user_id) {
   return log
 }
 
+
+//ログを読み込んで前回のPMIDを取得する
+function previousPmids(user_id) {
+  let date = new Date();
+  date.setDate(date.getDate() - 1)
+
+  let timestmp = Utilities.formatDate(date, 'Asia/Tokyo', 'yyyyMMdd');
+
+  let folder = '**************************';
+  let file = Utilities.formatString('%s_%s', timestmp, String(user_id));
+
+  const content = DriveApp.getFolderById(folder)
+  .getFilesByName(file)
+  .next()
+  .getBlob()
+  .getDataAsString("utf-8")
+
+  let previous_pmids = JSON.parse(content)[0];
+  previous_pmids = Object.values(previous_pmids).map((x) => parseInt(x,10));
+  
+  //console.log(previous_pmids);
+  return previous_pmids
+}
+
+
+//新規だと評価された論文のデータを取得してメールを送信する
 function fetchDataAndSendEmail(log, meta) {
   let pmids = Object.values(log[0]);
   let evaluation = log[1].evaluation;
@@ -156,4 +205,75 @@ function fetchDataAndSendEmail(log, meta) {
       sendEmail(data[i], meta);
     }
   });
+}
+
+
+
+//メールの送信を実行する関数
+function sendEmail(data, meta){
+
+  //メールの送信設定
+  subject='New paper';
+
+//メール文面の作成
+  let body = Utilities.formatString(
+    'PMIDS: %s<br>Journal: %s<br>Publish date: %s<br><br>Tile:<br><b>%s</b><br><br>%s<br><br>Abstract:<br>%s<br><br>%s',
+    data.pmid,
+    data.journal_name,
+    data.pubdate,
+    data.title,
+    data.link,
+    data.abst,
+    data.abst_jpn
+    );
+
+  address = meta.email;
+  //Gmailの送信
+  GmailApp.sendEmail(address,subject,body,{htmlBody:body});
+  console.log(address);
+}
+
+//abstractのHTMLタグを除去して整形する
+function processText(body){
+    //abstrastの両端の文字位置を取得
+    let start =[];
+    let end =[];
+    start = body.indexOf('<Abstract>')+10 ;
+    end= body.indexOf('</Abstract>') ;
+
+    //abstract の切り出し
+    let raw_text = body.substring(start,end);
+    let processed = raw_text.replace(/<("[^"]*"|'[^']*'|[^'">])*>/g,'').replace(/[\r\n]+/g,'');
+
+    while( processed.indexOf("  ") >=0){
+      processed = processed.replace("  ","").slice()
+    }
+  return processed;
+}
+
+
+//JSON形式でログを出力する
+function writeJson(log, user_id=) {
+  let timestmp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd');
+
+  var json_log = JSON.stringify(log);
+
+  var file = Utilities.formatString('%s_%s', timestmp, String(user_id));
+  let folder ="************************";
+
+  var blob = Utilities.newBlob("", "application/json", file);
+  var file = blob.setDataFromString(json_log, "UTF-8");
+
+  DriveApp.getFolderById(folder)
+  .createFile(file);
+
+  console.log('保存完了')
+}
+
+//エラーで実行だストップした際にメール通知する
+function errorEmail(meta) {
+  let address = "*******************" ;
+  let subject = "Error Notification";
+  let body = Utilities.formatString("Stopped due to error.\n(Run: %s).", meta.id);
+  GmailApp.sendEmail(address,subject,body);
 }
